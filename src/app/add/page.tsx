@@ -43,8 +43,9 @@ export default function AddPage() {
       const result = await analyzeMedicationPhoto(base64, photoFile.type);
       setAnalysis(result);
       setStep('form');
-    } catch {
-      setError('Could not analyze the photo. You can still enter details manually.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not analyze the photo.';
+      setError(`${message} You can enter the details manually below.`);
       setStep('form');
     } finally {
       setAnalyzing(false);

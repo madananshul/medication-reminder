@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic();
-
 export async function POST(request: NextRequest) {
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(
+        { error: 'API key not configured. Photo scan is not available.' },
+        { status: 500 }
+      );
+    }
+
+    const anthropic = new Anthropic();
     const { image, mediaType } = await request.json();
 
     if (!image || !mediaType) {

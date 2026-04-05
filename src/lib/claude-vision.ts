@@ -15,9 +15,15 @@ export async function analyzeMedicationPhoto(
     body: JSON.stringify({ image: photoBase64, mediaType }),
   });
 
-  if (!response.ok) {
-    throw new Error('Failed to analyze medication photo');
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    throw new Error(data.error || 'Failed to analyze medication photo');
   }
 
-  return response.json();
+  if (!data.name && !data.dosage) {
+    throw new Error('Could not read the medication label. Try a clearer photo or enter details manually.');
+  }
+
+  return data;
 }
