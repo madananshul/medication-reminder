@@ -78,8 +78,9 @@ If you cannot read certain fields, use empty strings for those fields. Do not in
     });
   } catch (error) {
     console.error('Medication analysis error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Failed to analyze medication photo' },
+      { error: `Failed to analyze medication photo: ${message}` },
       { status: 500 }
     );
   }
