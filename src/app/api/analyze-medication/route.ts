@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+
+const AZURE_ENDPOINT = 'https://ai-foundry-flowcoachai-east-us2.services.ai.azure.com/api/projects/flowcoachai/openai/v1/responses';
+const MODEL = 'gpt-5.4-mini';
 
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const apiKey = process.env.AZURE_AI_FOUNDRY_GPT_KEY;
+    if (!apiKey) {
       return NextResponse.json(
         { error: 'API key not configured. Photo scan is not available.' },
         { status: 500 }
       );
     }
 
-    const anthropic = new Anthropic();
     const { image, mediaType } = await request.json();
 
     if (!image || !mediaType) {
@@ -20,33 +22,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
-    type ValidMediaType = typeof validTypes[number];
-    if (!validTypes.includes(mediaType as ValidMediaType)) {
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(mediaType)) {
       return NextResponse.json(
         { error: 'Invalid image type. Use JPEG, PNG, GIF, or WebP.' },
         { status: 400 }
       );
     }
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType as ValidMediaType,
-                data: image,
+    const response = await fetch(AZURE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        input: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_image',
+                image_url: `data:${mediaType};base64,${image}`,
               },
-            },
-            {
-              type: 'text',
-              text: `Analyze this medication package/label photo. Extract the following information:
+              {
+                type: 'input_text',
+                text: `Analyze this medication package/label photo. Extract the following information:
 
 1. **name**: The medication/drug name (brand name and/or generic name)
 2. **dosage**: The dosage/strength (e.g., "500mg", "10mg/5ml")
@@ -57,18 +59,37 @@ Respond ONLY with a valid JSON object in this exact format:
 {"name": "...", "dosage": "...", "instructions": "...", "confidence": "high|medium|low"}
 
 If you cannot read certain fields, use empty strings for those fields. Do not include any text outside the JSON.`,
-            },
-          ],
-        },
-      ],
+              },
+            ],
+          },
+        ],
+        max_output_tokens: 1024,
+      }),
     });
 
-    const textContent = response.content.find((c) => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      throw new Error('No text response from Claude');
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Azure API error ${response.status}: ${errText.slice(0, 200)}`);
     }
 
-    const parsed = JSON.parse(textContent.text);
+    const result = await response.json();
+
+    // Extract text from Responses API output
+    let text = '';
+    for (const item of result.output || []) {
+      if (item.type === 'message') {
+        text = item.content?.map((c: { text?: string }) => c.text || '').join('') || '';
+        break;
+      }
+    }
+
+    if (!text) {
+      throw new Error('No text response from model');
+    }
+
+    // Strip markdown code fences if present
+    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(cleaned);
 
     return NextResponse.json({
       name: parsed.name || '',
