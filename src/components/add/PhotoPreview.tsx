@@ -7,9 +7,11 @@ interface PhotoPreviewProps {
   onAnalyze: () => void;
   onRetake: () => void;
   analyzing: boolean;
+  scanLabel?: string;
 }
 
-export function PhotoPreview({ imageUrl, onAnalyze, onRetake, analyzing }: PhotoPreviewProps) {
+export function PhotoPreview({ imageUrl, onAnalyze, onRetake, analyzing, scanLabel }: PhotoPreviewProps) {
+  const buttonLabel = scanLabel ?? 'Scan Label';
   return (
     <div className="space-y-4">
       <div className="rounded-2xl overflow-hidden border-2 border-gray-200">
@@ -25,7 +27,7 @@ export function PhotoPreview({ imageUrl, onAnalyze, onRetake, analyzing }: Photo
           Retake
         </Button>
         <Button size="lg" className="flex-1" onClick={onAnalyze} loading={analyzing}>
-          {analyzing ? 'Analyzing...' : 'Scan Label'}
+          {analyzing ? 'Analyzing...' : buttonLabel}
         </Button>
       </div>
     </div>

@@ -6,29 +6,40 @@ import { CameraCapture } from '@/components/add/CameraCapture';
 import { PhotoPreview } from '@/components/add/PhotoPreview';
 import { AnalysisResult } from '@/components/add/AnalysisResult';
 import { MedicationForm } from '@/components/medications/MedicationForm';
+import { PrescriptionReview } from '@/components/add/PrescriptionReview';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
 import { addMedication } from '@/lib/db-hooks';
-import { analyzeMedicationPhoto, type MedicationAnalysis } from '@/lib/claude-vision';
+import {
+  analyzeMedicationPhoto,
+  analyzePrescriptionPhoto,
+  type MedicationAnalysis,
+  type PrescriptionAnalysis,
+  type PrescriptionMedication,
+} from '@/lib/claude-vision';
 
-type Step = 'choose' | 'preview' | 'form';
+type Step = 'choose' | 'preview' | 'form' | 'prescription-review';
+type ScanMode = 'medication' | 'prescription' | null;
 
 export default function AddPage() {
   const router = useRouter();
   const { showToast } = useToast();
 
   const [step, setStep] = useState<Step>('choose');
+  const [scanMode, setScanMode] = useState<ScanMode>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<MedicationAnalysis | null>(null);
+  const [prescriptionResult, setPrescriptionResult] = useState<PrescriptionAnalysis | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>('');
 
-  const handleCapture = useCallback((file: File) => {
+  const handleCapture = useCallback((file: File, mode: ScanMode) => {
     setPhotoFile(file);
     setPhotoUrl(URL.createObjectURL(file));
+    setScanMode(mode);
     setStep('preview');
     setError('');
   }, []);
@@ -39,14 +50,27 @@ export default function AddPage() {
     setError('');
 
     try {
-      const base64 = await fileToBase64(photoFile);
-      const result = await analyzeMedicationPhoto(base64, 'image/jpeg');
-      setAnalysis(result);
-      setStep('form');
+      const maxDim = scanMode === 'prescription' ? 1200 : 600;
+      const base64 = await fileToBase64(photoFile, maxDim);
+
+      if (scanMode === 'prescription') {
+        const result = await analyzePrescriptionPhoto(base64, 'image/jpeg');
+        setPrescriptionResult(result);
+        setStep('prescription-review');
+      } else {
+        const result = await analyzeMedicationPhoto(base64, 'image/jpeg');
+        setAnalysis(result);
+        setStep('form');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not analyze the photo.';
-      setError(`${message} You can enter the details manually below.`);
-      setStep('form');
+      if (scanMode === 'prescription') {
+        setError(`${message} Try a clearer photo or add medications manually.`);
+        setStep('choose');
+      } else {
+        setError(`${message} You can enter the details manually below.`);
+        setStep('form');
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -54,6 +78,7 @@ export default function AddPage() {
 
   const handleManualEntry = () => {
     setAnalysis(null);
+    setScanMode(null);
     setStep('form');
   };
 
@@ -61,6 +86,8 @@ export default function AddPage() {
     setPhotoFile(null);
     setPhotoUrl('');
     setAnalysis(null);
+    setPrescriptionResult(null);
+    setScanMode(null);
     setStep('choose');
   };
 
@@ -81,15 +108,45 @@ export default function AddPage() {
     }
   };
 
+  const handleBatchSave = async (medications: PrescriptionMedication[]) => {
+    setSaving(true);
+    try {
+      for (const med of medications) {
+        await addMedication({
+          name: med.name,
+          dosage: med.dosage,
+          instructions: med.instructions,
+          timeSlots: med.timeSlots,
+          photoBlob: null,
+          active: true,
+        });
+      }
+      showToast(`${medications.length} medication${medications.length !== 1 ? 's' : ''} added!`);
+      router.push('/');
+    } catch {
+      showToast('Failed to save medications', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Step labels for the progress indicator
+  const stepLabels = scanMode === 'prescription'
+    ? ['Capture', 'Review', 'Save']
+    : ['Capture', 'Review', 'Save'];
+  const stepKeys: Step[] = scanMode === 'prescription'
+    ? ['choose', 'preview', 'prescription-review']
+    : ['choose', 'preview', 'form'];
+
   return (
     <div>
       {/* Step indicator */}
       <div className="flex items-center justify-center gap-2 mb-6">
-        {['Capture', 'Review', 'Save'].map((label, i) => {
-          const stepIndex = ['choose', 'preview', 'form'].indexOf(step);
+        {stepLabels.map((label, i) => {
+          const stepIndex = stepKeys.indexOf(step);
           const isActive = i <= stepIndex;
           return (
-            <div key={label} className="flex items-center gap-2">
+            <div key={label + i} className="flex items-center gap-2">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
                 {i + 1}
               </div>
@@ -102,13 +159,27 @@ export default function AddPage() {
 
       {/* Step: Choose (camera or manual) */}
       {step === 'choose' && (
-        <div className="space-y-6">
+        <div className="space-y-4">
+          {error && (
+            <Card className="border-yellow-300 bg-yellow-50">
+              <p className="text-yellow-800 text-base">{error}</p>
+            </Card>
+          )}
+
           <Card>
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Scan Medication</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Scan Medication Box</h2>
             <p className="text-base text-gray-600 mb-4">
-              Take a photo of your medication box and we&apos;ll read the label for you
+              Take a photo of one medication box and we&apos;ll read the label
             </p>
-            <CameraCapture onCapture={handleCapture} />
+            <CameraCapture onCapture={(file) => handleCapture(file, 'medication')} />
+          </Card>
+
+          <Card>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Scan Prescription</h2>
+            <p className="text-base text-gray-600 mb-4">
+              Take a photo of a doctor&apos;s prescription to add all medications at once
+            </p>
+            <CameraCapture onCapture={(file) => handleCapture(file, 'prescription')} />
           </Card>
 
           <div className="flex items-center gap-4">
@@ -138,12 +209,13 @@ export default function AddPage() {
               onAnalyze={handleAnalyze}
               onRetake={handleRetake}
               analyzing={analyzing}
+              scanLabel={scanMode === 'prescription' ? 'Scan Prescription' : 'Scan Label'}
             />
           </Card>
         </div>
       )}
 
-      {/* Step: Form (with optional analysis) */}
+      {/* Step: Form (single medication with optional analysis) */}
       {step === 'form' && (
         <div className="space-y-4">
           {error && (
@@ -171,16 +243,23 @@ export default function AddPage() {
           </Card>
         </div>
       )}
+
+      {/* Step: Prescription review (batch) */}
+      {step === 'prescription-review' && prescriptionResult && (
+        <PrescriptionReview
+          analysis={prescriptionResult}
+          onSave={handleBatchSave}
+          onCancel={handleRetake}
+          saving={saving}
+        />
+      )}
     </div>
   );
 }
 
-const MAX_IMAGE_DIMENSION = 600;
-
-async function fileToBase64(file: File): Promise<string> {
-  // Resize image to max 600px to stay within API limits
+async function fileToBase64(file: File, maxDimension: number = 600): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
   const w = Math.round(bitmap.width * scale);
   const h = Math.round(bitmap.height * scale);
 
