@@ -40,7 +40,7 @@ export default function AddPage() {
 
     try {
       const base64 = await fileToBase64(photoFile);
-      const result = await analyzeMedicationPhoto(base64, photoFile.type);
+      const result = await analyzeMedicationPhoto(base64, 'image/jpeg');
       setAnalysis(result);
       setStep('form');
     } catch (err) {
@@ -175,15 +175,28 @@ export default function AddPage() {
   );
 }
 
+const MAX_IMAGE_DIMENSION = 600;
+
 async function fileToBase64(file: File): Promise<string> {
+  // Resize image to max 600px to stay within API limits
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // Remove data:image/...;base64, prefix
       resolve(result.split(',')[1]);
     };
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 }
